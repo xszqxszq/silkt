@@ -26,3 +26,16 @@ SilkCoder.encode(pcmInputStream, silkOutputStream, sampleRate, bitRate)
 ```bash
 ./gradlew test
 ```
+
+## Origin And Licenses
+
+The encoder and resampler core is a machine-assisted Kotlin port of
+[tsilk](https://github.com/SnowLuma/tsilk). tsilk is licensed under the MIT
+License, with Copyright (c) 2026 tsilk contributors. The port also derives from
+the SILK fixed-point reference implementation, Copyright (c) 2006-2012,
+Skype Limited, under the BSD 3-Clause License.
+
+[silk-v3-decoder](https://github.com/kn007/silk-v3-decoder) and
+[silk-codec](https://github.com/KasukuSakura/silk-codec) were used as SILK v3
+format, compatibility, and performance references. This project is distributed
+under the MIT License; see [LICENSE](LICENSE).
