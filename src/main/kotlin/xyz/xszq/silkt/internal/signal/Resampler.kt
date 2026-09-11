@@ -12,16 +12,24 @@ private val RESAMPLER_3_4_COEFFICIENTS = intArrayOf(
     -18249, -12532, -97, 284, -495, 309, 10268, 20317, -94, 156, -48, -720, 5984, 18278, -45, -4, 237, -847,
     2540, 14662,
 )
+private val RESAMPLER_3_4_FIR_COEFFICIENTS =
+    RESAMPLER_3_4_COEFFICIENTS.copyOfRange(2, RESAMPLER_3_4_COEFFICIENTS.size)
 
 private val RESAMPLER_2_3_COEFFICIENTS = intArrayOf(
     -11891, -12486, 20, 211, -657, 688, 8423, 15911, -44, 197, -152, -653, 3855, 13015
 )
+private val RESAMPLER_2_3_FIR_COEFFICIENTS =
+    RESAMPLER_2_3_COEFFICIENTS.copyOfRange(2, RESAMPLER_2_3_COEFFICIENTS.size)
 
 private val RESAMPLER_1_2_COEFFICIENTS =
     intArrayOf(2415, -13101, 158, -295, -400, 1265, 4832, 7968)
+private val RESAMPLER_1_2_FIR_COEFFICIENTS =
+    RESAMPLER_1_2_COEFFICIENTS.copyOfRange(2, RESAMPLER_1_2_COEFFICIENTS.size)
 
 private val RESAMPLER_1_3_COEFFICIENTS =
     intArrayOf(16643, -14000, -331, 19, 581, 1421, 2290, 2845)
+private val RESAMPLER_1_3_FIR_COEFFICIENTS =
+    RESAMPLER_1_3_COEFFICIENTS.copyOfRange(2, RESAMPLER_1_3_COEFFICIENTS.size)
 
 private val UPSAMPLE_2_HQ_FIRST_COEFFICIENTS = intArrayOf(4280, 33727 - 65536)
 private val UPSAMPLE_2_HQ_SECOND_COEFFICIENTS = intArrayOf(16295, 54015 - 65536)
@@ -160,6 +168,7 @@ private fun resampleDownFir(
     inputRate: Int,
     outputRate: Int,
     coefficients: IntArray,
+    firCoefficients: IntArray,
     firFractions: Int
 ): IntArray {
     if (input.isEmpty()) {
@@ -168,16 +177,14 @@ private fun resampleDownFir(
 
     val batchSize = max(1, inputRate / 100)
     val iirState = IntArray(2)
-    val firState = IntArray(DOWN_FIR_ORDER)
-    val firCoefficients = coefficients.copyOfRange(2, coefficients.size)
     val indexIncrementQ16 = inverseRatioQ16(inputRate, outputRate)
-    val outputSamples = mutableListOf<Int>()
+    val output = IntArray(calculateDownFirOutputLength(input.size, batchSize, indexIncrementQ16))
+    val filteredSamples = IntArray(batchSize + DOWN_FIR_ORDER)
+    var outputOffset = 0
 
     var inputOffset = 0
     while (inputOffset < input.size) {
         val sampleCount = min(batchSize, input.size - inputOffset)
-        val filteredSamples = IntArray(sampleCount + DOWN_FIR_ORDER)
-        firState.copyInto(filteredSamples)
         resamplerAR2(
             iirState,
             0,
@@ -296,19 +303,36 @@ private fun resampleDownFir(
                     firCoefficients[highOffset + 5]
                 )
             }
-            outputSamples.add(sat16(rshiftRound(resultQ6, 6)))
+            output[outputOffset] = sat16(rshiftRound(resultQ6, 6))
+            outputOffset++
             indexQ16 += indexIncrementQ16
         }
 
         filteredSamples.copyInto(
-            firState,
+            filteredSamples,
             0,
             sampleCount,
             sampleCount + DOWN_FIR_ORDER
         )
         inputOffset += sampleCount
     }
-    return outputSamples.toIntArray()
+    return output
+}
+
+private fun calculateDownFirOutputLength(
+    inputLength: Int,
+    batchSize: Int,
+    indexIncrementQ16: Int
+): Int {
+    var remainingLength = inputLength
+    var outputLength = 0
+    while (remainingLength > 0) {
+        val sampleCount = min(batchSize, remainingLength)
+        val maximumIndexQ16 = sampleCount shl 16
+        outputLength += (maximumIndexQ16 + indexIncrementQ16 - 1) / indexIncrementQ16
+        remainingLength -= sampleCount
+    }
+    return outputLength
 }
 
 internal fun resample(
@@ -327,6 +351,7 @@ internal fun resample(
             inputRate,
             outputRate,
             RESAMPLER_1_2_COEFFICIENTS,
+            RESAMPLER_1_2_FIR_COEFFICIENTS,
             1
         )
     }
@@ -338,6 +363,7 @@ internal fun resample(
             inputRate,
             outputRate,
             RESAMPLER_2_3_COEFFICIENTS,
+            RESAMPLER_2_3_FIR_COEFFICIENTS,
             2
         )
     }
@@ -347,6 +373,7 @@ internal fun resample(
             inputRate,
             outputRate,
             RESAMPLER_3_4_COEFFICIENTS,
+            RESAMPLER_3_4_FIR_COEFFICIENTS,
             3
         )
     }
@@ -356,6 +383,7 @@ internal fun resample(
             inputRate,
             outputRate,
             RESAMPLER_1_3_COEFFICIENTS,
+            RESAMPLER_1_3_FIR_COEFFICIENTS,
             1
         )
     }
