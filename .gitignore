@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+.kotlin/
+out/
+
+# Kotlin
+*.hprof
+
+# IDE
+.idea/
+.vscode/
+.metals/
+*.iml
+
+# OS
+.DS_Store
+
+# Local benchmark and corpus artifacts
+/benchmarks/
+/corpus/
+node_modules/
+*.pcm
+*.silk
+*.wav
+
+# Packaging artifacts
+*.zip
+*.tar.gz
+
+# Logs
+*.log
