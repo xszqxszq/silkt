@@ -41,23 +41,18 @@ internal fun mulUint(a: Int, b: Int): Int {
 internal fun mla(a32: Int, b32: Int, c32: Int): Int = a32 + b32 * c32
 
 internal fun smulwb(a32: Int, b16: Int): Int {
-    val b32 = toInt16(b16)
-    val highProduct = (a32 shr 16) * b32
-    val lowProduct = toInt32((a32 and 65535) * b32) shr 16
-    return highProduct + lowProduct
+    return ((a32.toLong() * toInt16(b16).toLong()) shr 16).toInt()
 }
 
 internal fun smlawb(a32: Int, b32: Int, c16: Int): Int =
-    toInt32(a32 + smulwb(b32, c16))
+    (a32.toLong() + ((b32.toLong() * toInt16(c16).toLong()) shr 16)).toInt()
 
 internal fun smulwt(a32: Int, b32: Int): Int {
-    val highProduct = (a32 shr 16) * (b32 shr 16)
-    val lowProduct = toInt32((a32 and 65535) * (b32 shr 16)) shr 16
-    return highProduct + lowProduct
+    return ((a32.toLong() * (b32 shr 16).toLong()) shr 16).toInt()
 }
 
 internal fun smlawt(a32: Int, b32: Int, c32: Int): Int =
-    toInt32(a32 + smulwt(b32, c32))
+    (a32.toLong() + ((b32.toLong() * (c32 shr 16).toLong()) shr 16)).toInt()
 
 internal fun smulww(a32: Int, b32: Int): Int =
     mla(smulwb(a32, b32), a32, rshiftRound(b32, 16))
@@ -316,13 +311,5 @@ internal fun addSat16(a: Int, b: Int): Int {
 }
 
 internal fun clz32(value: Int): Int {
-    if (value == 0) return 32
-
-    var remaining = value
-    var count = 0
-    while (remaining >= 0) {
-        count++
-        remaining = remaining shl 1
-    }
-    return count
+    return Integer.numberOfLeadingZeros(value)
 }
