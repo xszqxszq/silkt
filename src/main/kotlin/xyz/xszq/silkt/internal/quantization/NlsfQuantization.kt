@@ -111,11 +111,29 @@ private fun calculateNlsfVectorErrors(
     codebookVectorCount: Int,
     order: Int
 ) {
-    var packedWeightIndex = 0
-    while (packedWeightIndex < order shr 1) {
-        packedWeightsQ6[packedWeightIndex] = weightsQ6[2 * packedWeightIndex] or
-                (weightsQ6[2 * packedWeightIndex + 1] shl 16)
-        packedWeightIndex++
+    if (order == 16) {
+        calculateNlsfVectorErrorsOrder16(
+            errorsQ20,
+            packedWeightsQ6,
+            inputVectorsQ15,
+            inputOffset,
+            codebookVectorsQ15,
+            inputVectorCount,
+            codebookVectorCount
+        )
+        return
+    }
+    if (order == 10) {
+        calculateNlsfVectorErrorsOrder10(
+            errorsQ20,
+            packedWeightsQ6,
+            inputVectorsQ15,
+            inputOffset,
+            codebookVectorsQ15,
+            inputVectorCount,
+            codebookVectorCount
+        )
+        return
     }
 
     var errorOffset = 0
@@ -153,6 +171,117 @@ private fun calculateNlsfVectorErrors(
         errorOffset += codebookVectorCount
         vectorInputOffset += order
         inputVectorIndex++
+    }
+}
+
+@Suppress("DuplicatedCode")
+private fun calculateNlsfVectorErrorsOrder16(
+    errorsQ20: IntArray,
+    packedWeightsQ6: IntArray,
+    inputVectorsQ15: IntArray,
+    inputOffset: Int,
+    codebookVectorsQ15: IntArray,
+    inputVectorCount: Int,
+    codebookVectorCount: Int
+) {
+    var errorOffset = 0
+    var vectorInputOffset = inputOffset
+    var inputVectorIndex = 0
+    while (inputVectorIndex < inputVectorCount) {
+        var codebookOffset = 0
+        var codebookVectorIndex = 0
+        while (codebookVectorIndex < codebookVectorCount) {
+            var weightedErrorQ20 = 0
+            var pairIndex = 0
+            while (pairIndex < 8) {
+                val packedWeightQ6 = packedWeightsQ6[pairIndex]
+                var differenceQ15 =
+                    inputVectorsQ15[vectorInputOffset] - codebookVectorsQ15[codebookOffset]
+                weightedErrorQ20 = smlawb(
+                    weightedErrorQ20,
+                    smulbb(differenceQ15, differenceQ15),
+                    packedWeightQ6
+                )
+                differenceQ15 =
+                    inputVectorsQ15[vectorInputOffset + 1] - codebookVectorsQ15[codebookOffset + 1]
+                weightedErrorQ20 = smlawt(
+                    weightedErrorQ20,
+                    smulbb(differenceQ15, differenceQ15),
+                    packedWeightQ6
+                )
+                vectorInputOffset += 2
+                codebookOffset += 2
+                pairIndex++
+            }
+            errorsQ20[errorOffset + codebookVectorIndex] = weightedErrorQ20
+            codebookVectorIndex++
+            vectorInputOffset -= 16
+        }
+        errorOffset += codebookVectorCount
+        vectorInputOffset += 16
+        inputVectorIndex++
+    }
+}
+
+@Suppress("DuplicatedCode")
+private fun calculateNlsfVectorErrorsOrder10(
+    errorsQ20: IntArray,
+    packedWeightsQ6: IntArray,
+    inputVectorsQ15: IntArray,
+    inputOffset: Int,
+    codebookVectorsQ15: IntArray,
+    inputVectorCount: Int,
+    codebookVectorCount: Int
+) {
+    var errorOffset = 0
+    var vectorInputOffset = inputOffset
+    var inputVectorIndex = 0
+    while (inputVectorIndex < inputVectorCount) {
+        var codebookOffset = 0
+        var codebookVectorIndex = 0
+        while (codebookVectorIndex < codebookVectorCount) {
+            var weightedErrorQ20 = 0
+            var pairIndex = 0
+            while (pairIndex < 5) {
+                val packedWeightQ6 = packedWeightsQ6[pairIndex]
+                var differenceQ15 =
+                    inputVectorsQ15[vectorInputOffset] - codebookVectorsQ15[codebookOffset]
+                weightedErrorQ20 = smlawb(
+                    weightedErrorQ20,
+                    smulbb(differenceQ15, differenceQ15),
+                    packedWeightQ6
+                )
+                differenceQ15 =
+                    inputVectorsQ15[vectorInputOffset + 1] - codebookVectorsQ15[codebookOffset + 1]
+                weightedErrorQ20 = smlawt(
+                    weightedErrorQ20,
+                    smulbb(differenceQ15, differenceQ15),
+                    packedWeightQ6
+                )
+                vectorInputOffset += 2
+                codebookOffset += 2
+                pairIndex++
+            }
+            errorsQ20[errorOffset + codebookVectorIndex] = weightedErrorQ20
+            codebookVectorIndex++
+            vectorInputOffset -= 10
+        }
+        errorOffset += codebookVectorCount
+        vectorInputOffset += 10
+        inputVectorIndex++
+    }
+}
+
+private fun packNlsfWeights(
+    packedWeightsQ6: IntArray,
+    weightsQ6: IntArray,
+    order: Int
+) {
+    var packedWeightIndex = 0
+    while (packedWeightIndex < order shr 1) {
+        packedWeightsQ6[packedWeightIndex] = weightsQ6[2 * packedWeightIndex] or
+                (weightsQ6[2 * packedWeightIndex + 1] shl 16)
+        packedWeightIndex++
     }
 }
 
@@ -269,6 +398,7 @@ internal fun encodeNlsfMsvq(
     val nextSurvivorPaths = workspace.nextSurvivorPaths
     val residualQ15 = workspace.residualQ15
     val nextResidualQ15 = workspace.nextResidualQ15
+    packNlsfWeights(workspace.packedWeightsQ6, weightsQ6, order)
     accumulatedRatesQ5[0] = 0
     nlsfQ15.copyInto(residualQ15, 0, 0, order)
 
