@@ -523,8 +523,12 @@ private fun quantizeNoiseShapeSubframeDelayedDecision(
     sampleHistoryIndexRef: RefInt,
     decisionDelay: Int
 ) {
-    var ltpShapeLagIndex = state.ltpShapeWriteIndex - lag + (HARMONIC_SHAPE_FIR_TAPS shr 1)
-    var ltpExcitationLagIndex = state.ltpExcitationWriteIndex - lag + (LTP_ORDER shr 1)
+    val stateLtpShapeQ10 = state.ltpShapeQ10
+    var ltpShapeWriteIndex = state.ltpShapeWriteIndex
+    var ltpExcitationWriteIndex = state.ltpExcitationWriteIndex
+    var ltpShapeLagIndex = ltpShapeWriteIndex - lag + (HARMONIC_SHAPE_FIR_TAPS shr 1)
+    var ltpExcitationLagIndex = ltpExcitationWriteIndex - lag + (LTP_ORDER shr 1)
+    var sampleHistoryIndex = sampleHistoryIndexRef.value
     var sampleIndex = 0
     while (sampleIndex < subframeLength) {
         var ltpPredQ14 = 0
@@ -555,46 +559,55 @@ private fun quantizeNoiseShapeSubframeDelayedDecision(
         var longTermPredictionNoiseQ14 = 0
         if (lag > 0) {
             longTermPredictionNoiseQ14 = smulwb(
-                add32(state.ltpShapeQ10[ltpShapeLagIndex], state.ltpShapeQ10[(ltpShapeLagIndex - 2)]),
+                add32(
+                    stateLtpShapeQ10[ltpShapeLagIndex],
+                    stateLtpShapeQ10[(ltpShapeLagIndex - 2)]
+                ),
                 harmShapeFirPackedQ14
             )
             longTermPredictionNoiseQ14 =
-                smlawt(longTermPredictionNoiseQ14, state.ltpShapeQ10[(ltpShapeLagIndex - 1)], harmShapeFirPackedQ14)
+                smlawt(
+                    longTermPredictionNoiseQ14,
+                    stateLtpShapeQ10[(ltpShapeLagIndex - 1)],
+                    harmShapeFirPackedQ14
+                )
             longTermPredictionNoiseQ14 = leftShift(longTermPredictionNoiseQ14, 6)
             ltpShapeLagIndex++
         }
         var decisionIndex = 0
+        val lpcHistoryIndex = LPC_HISTORY_BUFFER_LENGTH - 1 + sampleIndex
         while (decisionIndex < delayedDecisionCount) {
             val decision = delayedDecisions[decisionIndex]
             val bestState = sampleStates[decisionIndex][0]
             val secondState = sampleStates[decisionIndex][1]
             decision.seed = rand(decision.seed)
             val dither = rightShift(decision.seed, 31)
-            val lpcHistoryIndex = LPC_HISTORY_BUFFER_LENGTH - 1 + sampleIndex
+            val decisionLpcStateQ14 = decision.lpcStateQ14
             var lpcPredQ10 = smulwb(
-                decision.lpcStateQ14[lpcHistoryIndex],
+                decisionLpcStateQ14[lpcHistoryIndex],
                 predictionCoefficientsQ12[predictionCoefficientOffset]
             )
             var predictionCoefficientIndex = 1
             while (predictionCoefficientIndex < predictionLpcOrder) {
                 lpcPredQ10 = smlawb(
                     lpcPredQ10,
-                    decision.lpcStateQ14[(lpcHistoryIndex - predictionCoefficientIndex)],
+                    decisionLpcStateQ14[(lpcHistoryIndex - predictionCoefficientIndex)],
                     predictionCoefficientsQ12[(predictionCoefficientOffset + predictionCoefficientIndex)]
                 )
                 predictionCoefficientIndex++
             }
             var currentStateQ14 = smlawb(
-                decision.lpcStateQ14[lpcHistoryIndex],
+                decisionLpcStateQ14[lpcHistoryIndex],
                 decision.autoregressiveStateQ14[0],
                 warpingQ16
             )
+            val decisionAutoregressiveStateQ14 = decision.autoregressiveStateQ14
             var previousStateQ14 = smlawb(
-                decision.autoregressiveStateQ14[0],
-                sub32(decision.autoregressiveStateQ14[1], currentStateQ14),
+                decisionAutoregressiveStateQ14[0],
+                sub32(decisionAutoregressiveStateQ14[1], currentStateQ14),
                 warpingQ16
             )
-            decision.autoregressiveStateQ14[0] = currentStateQ14
+            decisionAutoregressiveStateQ14[0] = currentStateQ14
             var autoregressiveNoiseQ10 = smulwb(
                 currentStateQ14,
                 autoregressiveShapingCoefficientsQ13[autoregressiveShapingCoefficientOffset]
@@ -602,22 +615,28 @@ private fun quantizeNoiseShapeSubframeDelayedDecision(
             var autoregressiveCoefficientIndex = 2
             while (autoregressiveCoefficientIndex < shapingLpcOrder) {
                 currentStateQ14 = smlawb(
-                    decision.autoregressiveStateQ14[autoregressiveCoefficientIndex - 1],
-                    sub32(decision.autoregressiveStateQ14[autoregressiveCoefficientIndex], previousStateQ14),
+                    decisionAutoregressiveStateQ14[autoregressiveCoefficientIndex - 1],
+                    sub32(
+                        decisionAutoregressiveStateQ14[autoregressiveCoefficientIndex],
+                        previousStateQ14
+                    ),
                     warpingQ16
                 )
-                decision.autoregressiveStateQ14[autoregressiveCoefficientIndex - 1] = previousStateQ14
+                decisionAutoregressiveStateQ14[autoregressiveCoefficientIndex - 1] = previousStateQ14
                 autoregressiveNoiseQ10 = smlawb(
                     autoregressiveNoiseQ10,
                     previousStateQ14,
                     autoregressiveShapingCoefficientsQ13[autoregressiveShapingCoefficientOffset + autoregressiveCoefficientIndex - 1]
                 )
                 previousStateQ14 = smlawb(
-                    decision.autoregressiveStateQ14[autoregressiveCoefficientIndex],
-                    sub32(decision.autoregressiveStateQ14[(autoregressiveCoefficientIndex + 1)], currentStateQ14),
+                    decisionAutoregressiveStateQ14[autoregressiveCoefficientIndex],
+                    sub32(
+                        decisionAutoregressiveStateQ14[(autoregressiveCoefficientIndex + 1)],
+                        currentStateQ14
+                    ),
                     warpingQ16
                 )
-                decision.autoregressiveStateQ14[autoregressiveCoefficientIndex] = currentStateQ14
+                decisionAutoregressiveStateQ14[autoregressiveCoefficientIndex] = currentStateQ14
                 autoregressiveNoiseQ10 = smlawb(
                     autoregressiveNoiseQ10,
                     currentStateQ14,
@@ -625,7 +644,7 @@ private fun quantizeNoiseShapeSubframeDelayedDecision(
                 )
                 autoregressiveCoefficientIndex += 2
             }
-            decision.autoregressiveStateQ14[shapingLpcOrder - 1] = previousStateQ14
+            decisionAutoregressiveStateQ14[shapingLpcOrder - 1] = previousStateQ14
             autoregressiveNoiseQ10 = smlawb(
                 autoregressiveNoiseQ10,
                 previousStateQ14,
@@ -634,7 +653,7 @@ private fun quantizeNoiseShapeSubframeDelayedDecision(
             autoregressiveNoiseQ10 = rightShift(autoregressiveNoiseQ10, 1)
             autoregressiveNoiseQ10 = smlawb(autoregressiveNoiseQ10, decision.lowFrequencyShapingStateQ12, tiltQ14)
             var lowFrequencyNoiseQ10 = leftShift(
-                smulwb(decision.ltpShapeQ10[sampleHistoryIndexRef.value], lowFrequencyShapingQ14),
+                smulwb(decision.ltpShapeQ10[sampleHistoryIndex], lowFrequencyShapingQ14),
                 2
             )
             lowFrequencyNoiseQ10 =
@@ -724,8 +743,8 @@ private fun quantizeNoiseShapeSubframeDelayedDecision(
             secondState.lpcExcitationQ16 = leftShift(lpcExcitationQ10, 6)
             decisionIndex++
         }
-        sampleHistoryIndexRef.value = (sampleHistoryIndexRef.value - 1) and DECISION_DELAY_MASK
-        val lastSampleIndex = (sampleHistoryIndexRef.value + decisionDelay) and DECISION_DELAY_MASK
+        sampleHistoryIndex = (sampleHistoryIndex - 1) and DECISION_DELAY_MASK
+        val lastSampleIndex = (sampleHistoryIndex + decisionDelay) and DECISION_DELAY_MASK
         val winnerIndex = selectBestSampleStateIndex(sampleStates, delayedDecisionCount)
         penalizeMismatchedSeedStates(
             delayedDecisions,
@@ -751,25 +770,28 @@ private fun quantizeNoiseShapeSubframeDelayedDecision(
                         10
                     )
                 )
-            state.ltpShapeQ10[(state.ltpShapeWriteIndex - decisionDelay)] = winner.ltpShapeQ10[lastSampleIndex]
-            scaledLtpExcitationQ16[(state.ltpExcitationWriteIndex - decisionDelay)] =
+            stateLtpShapeQ10[(ltpShapeWriteIndex - decisionDelay)] = winner.ltpShapeQ10[lastSampleIndex]
+            scaledLtpExcitationQ16[(ltpExcitationWriteIndex - decisionDelay)] =
                 winner.lpcExcitationQ16[lastSampleIndex]
         }
-        state.ltpShapeWriteIndex++
-        state.ltpExcitationWriteIndex++
+        ltpShapeWriteIndex++
+        ltpExcitationWriteIndex++
         var historyUpdateIndex = 0
         while (historyUpdateIndex < delayedDecisionCount) {
             commitDelayedDecisionSample(
                 delayedDecisions[historyUpdateIndex],
                 sampleStates[historyUpdateIndex][0],
                 sampleIndex,
-                sampleHistoryIndexRef.value,
+                sampleHistoryIndex,
                 gainQ16
             )
             historyUpdateIndex++
         }
         sampleIndex++
     }
+    sampleHistoryIndexRef.value = sampleHistoryIndex
+    state.ltpShapeWriteIndex = ltpShapeWriteIndex
+    state.ltpExcitationWriteIndex = ltpExcitationWriteIndex
     resetDelayedDecisionHistories(delayedDecisions, delayedDecisionCount, subframeLength)
 }
 
